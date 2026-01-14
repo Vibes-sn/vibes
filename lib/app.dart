@@ -1,7 +1,7 @@
 import 'package:device_preview/device_preview.dart';
 import 'package:flutter/material.dart';
 import 'package:vibes/core/theme/app_theme.dart';
-import 'package:vibes/features/home/presentation/home_screen.dart';
+import 'package:vibes/features/auth/presentation/welcome_screen.dart';
 
 class VibesApp extends StatelessWidget {
   const VibesApp({super.key});
@@ -15,7 +15,7 @@ class VibesApp extends StatelessWidget {
       locale: DevicePreview.locale(context),
       builder: DevicePreview.appBuilder,
       theme: AppTheme.dark,
-      home: const HomeScreen(),
+      home: const WelcomeScreen(),
     );
   }
 }

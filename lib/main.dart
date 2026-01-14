@@ -3,7 +3,8 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
 import 'package:device_preview/device_preview.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:vibes/app.dart';
+import 'package:vibes/features/auth/presentation/login_screen.dart';
+import 'package:vibes/features/home/presentation/home_screen.dart';
 
 const supabaseUrl = String.fromEnvironment(
   'SUPABASE_URL',
@@ -25,7 +26,89 @@ Future<void> main() async {
   runApp(
     DevicePreview(
       enabled: true, // désactivable en prod
-      builder: (context) => const VibesApp(),
+      builder: (context) => const _RootApp(),
     ),
   );
+}
+
+class _RootApp extends StatelessWidget {
+  const _RootApp();
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      locale: DevicePreview.locale(context),
+      builder: DevicePreview.appBuilder,
+      home: StreamBuilder<AuthState>(
+        stream: Supabase.instance.client.auth.onAuthStateChange,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const _SplashScreen();
+          }
+          final data = snapshot.data;
+          final session = data?.session;
+          if (session != null) {
+            return const HomeScreen();
+          }
+          return const LoginScreen();
+        },
+      ),
+    );
+  }
+}
+
+class _SplashScreen extends StatefulWidget {
+  const _SplashScreen();
+
+  @override
+  State<_SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<_SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0E1A),
+      body: Center(
+        child: ScaleTransition(
+          scale: Tween<double>(begin: 0.9, end: 1.05).animate(
+            CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+          ),
+          child: ShaderMask(
+            shaderCallback: (rect) => const LinearGradient(
+              colors: [Color(0xFFFF6FB1), Color(0xFFFF9F66)],
+            ).createShader(rect),
+            child: const Text(
+              'Vibes',
+              style: TextStyle(
+                fontSize: 42,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
