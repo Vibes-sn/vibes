@@ -6,7 +6,9 @@ class EventModel {
     required this.locationName,
     required this.price,
     required this.imageUrl,
+    this.capacity,
     this.description,
+    this.category,
   });
 
   final String id;
@@ -15,7 +17,9 @@ class EventModel {
   final String locationName;
   final num price;
   final String imageUrl;
+  final int? capacity;
   final String? description;
+  final String? category;
 
   factory EventModel.fromMap(Map<String, dynamic> map) {
     final image = map['image_url'] as String?;
@@ -25,7 +29,9 @@ class EventModel {
       eventDate: DateTime.parse(map['event_date'] as String),
       locationName: map['location_name'] as String,
       price: (map['price'] ?? 0) as num,
+      capacity: map['capacity'] as int?,
       description: map['description'] as String?,
+      category: map['category'] as String?,
       imageUrl: image?.isNotEmpty == true
           ? image!
           : 'https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=900',

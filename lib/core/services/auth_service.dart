@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AuthService {
@@ -16,14 +17,28 @@ class AuthService {
     required String fullName,
   }) async {
     try {
+      _log('signUp start email=$email');
       final response = await _client.auth.signUp(
         email: email,
         password: password,
         data: {'full_name': fullName},
       );
+      final user = response.user;
+      if (user != null) {
+        await _client.from('profiles').upsert({
+          'id': user.id,
+          'full_name': fullName,
+        });
+        _log('profile upserted id=${user.id}');
+      }
+      _log('signUp success user=${response.user?.id}');
       return response;
+    } on AuthException catch (e) {
+      _log('signUp auth error: ${e.message}');
+      throw Exception(e.message);
     } catch (e) {
-      throw Exception('Inscription échouée : $e');
+      _log('signUp error: $e');
+      throw Exception('Une erreur est survenue, réessaie.');
     }
   }
 
@@ -32,58 +47,78 @@ class AuthService {
     required String password,
   }) async {
     try {
+      _log('signIn start email=$email');
       final response = await _client.auth.signInWithPassword(
         email: email,
         password: password,
       );
+      final user = response.user;
+      if (user != null) {
+        final fullName =
+            (user.userMetadata?['full_name'] as String?) ??
+            user.email?.split('@').first ??
+            'Viber';
+        await _client.from('profiles').upsert({
+          'id': user.id,
+          'full_name': fullName,
+        });
+        _log('profile upserted id=${user.id}');
+      }
+      _log('signIn success user=${response.user?.id}');
       return response;
+    } on AuthException catch (e) {
+      _log('signIn auth error: ${e.message}');
+      throw Exception(e.message);
     } catch (e) {
-      throw Exception('Connexion échouée : $e');
+      _log('signIn error: $e');
+      throw Exception('Impossible de te connecter, réessaie.');
     }
   }
 
   Future<void> signOut() async {
     try {
+      _log('signOut start');
       await _client.auth.signOut();
+      _log('signOut success');
+    } on AuthException catch (e) {
+      _log('signOut auth error: ${e.message}');
+      throw Exception(e.message);
     } catch (e) {
-      throw Exception('Déconnexion échouée : $e');
+      _log('signOut error: $e');
+      throw Exception('Erreur lors de la déconnexion.');
     }
   }
 
-  Future<void> signInWithGoogle() async {
+  Future<String> toggleRole(String role) async {
+    final user = _client.auth.currentUser;
+    if (user == null) {
+      throw Exception('Utilisateur non connecté.');
+    }
     try {
-      await _client.auth.signInWithOAuth(
-        OAuthProvider.google,
-        redirectTo: 'io.supabase.vibes://callback',
-      );
-    } catch (e) {
-      final msg = '$e';
-      if (msg.toLowerCase().contains('provider is not enabled')) {
-        throw Exception(
-          'Google OAuth non activé dans Supabase (Auth > Settings > External OAuth).',
-        );
+      _log('toggleRole start user=${user.id} role=$role');
+      final updated = await _client
+          .from('profiles')
+          .update({'role': role})
+          .eq('id', user.id)
+          .select('role')
+          .maybeSingle();
+      await _client.auth.refreshSession();
+      if (updated == null) {
+        throw Exception('Aucun profil mis à jour (RLS ou profil manquant).');
       }
-      throw Exception('Connexion Google échouée : $msg');
+      final newRole = updated['role'] as String? ?? role;
+      _log('toggleRole success role=$newRole');
+      return newRole;
+    } on PostgrestException catch (e) {
+      _log('toggleRole error: ${e.message}');
+      throw Exception(e.message);
+    } catch (e) {
+      _log('toggleRole error: $e');
+      throw Exception('Impossible de changer le rôle.');
     }
   }
 
-  Future<void> signInWithPhone(String phone) async {
-    try {
-      await _client.auth.signInWithOtp(phone: phone);
-    } catch (e) {
-      throw Exception('Connexion par téléphone échouée : $e');
-    }
-  }
-
-  Future<void> verifyOtp(String phone, String token) async {
-    try {
-      await _client.auth.verifyOTP(
-        phone: phone,
-        token: token,
-        type: OtpType.sms,
-      );
-    } catch (e) {
-      throw Exception('Vérification OTP échouée : $e');
-    }
+  void _log(String message) {
+    debugPrint('[AuthService] $message');
   }
 }
