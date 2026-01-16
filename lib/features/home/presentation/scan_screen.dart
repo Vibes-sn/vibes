@@ -1,9 +1,13 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:vibes/core/theme/app_theme.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ScanScreen extends StatefulWidget {
-  const ScanScreen({super.key});
+  const ScanScreen({super.key, this.simplified = false});
+
+  final bool simplified;
 
   @override
   State<ScanScreen> createState() => _ScanScreenState();
@@ -18,6 +22,55 @@ class _ScanScreenState extends State<ScanScreen> {
   int scanned = 124;
   int capacity = 300;
   bool _showingDialog = false;
+  bool _checkingRole = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _ensureOrganizerAccess();
+  }
+
+  Future<void> _ensureOrganizerAccess() async {
+    final client = Supabase.instance.client;
+    final user = client.auth.currentUser;
+    if (user == null) {
+      _showFeedback(
+        context,
+        message: 'Connecte-toi pour scanner.',
+        isError: true,
+      );
+      if (mounted) Navigator.of(context).pop();
+      return;
+    }
+    try {
+      final profile = await client
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .maybeSingle();
+      final role = profile?['role'] as String?;
+      if (role != 'host' && role != 'pro') {
+        _showFeedback(
+          context,
+          message: 'Accès réservé aux organisateurs.',
+          isError: true,
+        );
+        if (mounted) Navigator.of(context).pop();
+        return;
+      }
+    } catch (e) {
+      _log('Erreur role scan: $e');
+      _showFeedback(
+        context,
+        message: 'Impossible de vérifier tes droits.',
+        isError: true,
+      );
+      if (mounted) Navigator.of(context).pop();
+      return;
+    } finally {
+      if (mounted) setState(() => _checkingRole = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -39,7 +92,7 @@ class _ScanScreenState extends State<ScanScreen> {
     try {
       final result = await client
           .from('tickets')
-          .select('id, status, user_id')
+          .select('id, status, user_id, profiles(full_name)')
           .eq('qr_code_data', code)
           .maybeSingle();
 
@@ -58,7 +111,7 @@ class _ScanScreenState extends State<ScanScreen> {
         await _showResultDialog(
           valid: false,
           alreadyUsed: true,
-          name: result['user_id'] as String? ?? 'Utilisateur',
+          name: (result['profiles']?['full_name'] as String?) ?? 'Utilisateur',
           message: 'TICKET DÉJÀ VALIDÉ',
         );
         return;
@@ -72,14 +125,16 @@ class _ScanScreenState extends State<ScanScreen> {
       await _showResultDialog(
         valid: true,
         alreadyUsed: false,
-        name: result['user_id'] as String? ?? 'Utilisateur',
+        name: (result['profiles']?['full_name'] as String?) ?? 'Utilisateur',
         message: 'TICKET VALIDE',
       );
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
+      _log('Erreur scan: $e');
+      _showFeedback(
         context,
-      ).showSnackBar(SnackBar(content: Text('Erreur scan: $e')));
+        message: 'Erreur de scan. Réessaie.',
+        isError: true,
+      );
     }
   }
 
@@ -163,7 +218,8 @@ class _ScanScreenState extends State<ScanScreen> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          MobileScanner(controller: _controller, onDetect: _handleBarcode),
+          if (!_checkingRole)
+            MobileScanner(controller: _controller, onDetect: _handleBarcode),
           Container(color: Colors.black.withValues(alpha: 0.35)),
           _CenterOverlay(),
           Positioned(
@@ -180,36 +236,35 @@ class _ScanScreenState extends State<ScanScreen> {
                   },
                   icon: const Icon(Icons.close_rounded, color: Colors.white),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.5),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white24),
-                    ),
-                    child: Text(
-                      'Entrées : $scanned / $capacity',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
+                if (!widget.simplified) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: Text(
+                        'Entrées : $scanned / $capacity',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
+                ],
+                const Spacer(),
                 IconButton(
                   onPressed: () async {
-                    final messenger = ScaffoldMessenger.of(context);
                     await _controller.toggleTorch();
                     if (!context.mounted) return;
-                    messenger.showSnackBar(
-                      SnackBar(content: const Text('Flash togglé')),
-                    );
+                    _showFeedback(context, message: 'Flash togglé');
                   },
                   icon: const Icon(Icons.flash_on_rounded, color: Colors.white),
                 ),
@@ -220,6 +275,64 @@ class _ScanScreenState extends State<ScanScreen> {
       ),
     );
   }
+}
+
+void _showFeedback(
+  BuildContext context, {
+  required String message,
+  bool isError = false,
+}) {
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.clearSnackBars();
+  messenger.showSnackBar(
+    SnackBar(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      content: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: isError
+                ? [Colors.red.shade900, Colors.red.shade700]
+                : const [AppColors.gradientStart, AppColors.gradientEnd],
+          ),
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: (isError ? Colors.red : AppColors.gradientStart)
+                  .withValues(alpha: 0.25),
+              blurRadius: 12,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Icon(
+              isError ? Icons.error_rounded : Icons.check_circle_rounded,
+              color: Colors.white,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+void _log(String message) {
+  debugPrint('[ScanScreen] $message');
 }
 
 class _CenterOverlay extends StatelessWidget {
